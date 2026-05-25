@@ -434,37 +434,36 @@ jobs:
 
 ## Info
 
-- Requested Quality: $QUALITY
-- Actual Source Quality: ${HEIGHT}p
+      - Requested Quality: $QUALITY
+      - Actual Source Quality: ${HEIGHT}p
+      
+      ## Files
+      
+      - Video / Archive
+      - Main thumbnail
+      - 3 preview thumbnails
+      
+        EOF
+  
+rm -rf "$TMP_DIR"
+    done
+  
+  # ============================================================
+  # STOP WARP
+  # ============================================================
+  
+         - name: Stop WARP
+  if: always()
+  run: |
+    docker stop warp || true
+    docker rm warp || true
 
-## Files
+# ============================================================
+# PUSH
+# ============================================================
 
-- Video / Archive
-- Main thumbnail
-- 3 preview thumbnails
-
-EOF
-
-            rm -rf "$TMP_DIR"
-
-          done
-
-      # ============================================================
-      # STOP WARP
-      # ============================================================
-
-      - name: Stop WARP
-        if: always()
-        run: |
-          docker stop warp || true
-          docker rm warp || true
-
-      # ============================================================
-      # PUSH
-      # ============================================================
-
-      - name: Push
-        run: |
+ - name: Push
+run: |
 
           find videos -name "*.part" -delete
           find videos -name "*.temp" -delete

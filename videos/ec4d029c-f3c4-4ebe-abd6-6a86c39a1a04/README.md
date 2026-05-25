@@ -9,7 +9,7 @@
 | **Video Name** | `ec4d029c-f3c4-4ebe-abd6-6a86c39a1a04` |
 | **Original Link** | [YouTube Video](https://c2ri.scdn.st/ec4d029c-f3c4-4ebe-abd6-6a86c39a1a04.mp4?n=BNWO) |
 | **Total Size** | **27 parts** - **1197.48 MB** |
-| **Quality** | **best** |
+| **Quality** | **480** |
 | **Status** | **Complete (100%)** |
 | **Password Protected** | **NO** |
 

@@ -1,68 +1,47 @@
-name: 02 - 🎬 دانلود خودم ساز
+# ===========================
+# PATCHES FOR YOUR ORIGINAL SCRIPT
+# ONLY THE CHANGED PARTS
+# ===========================
+
+name: 02 - 🎬 دانلود یوتیوب
 
 on:
   workflow_dispatch:
     inputs:
       video_urls:
-        description: '🔗 لینک ها'
+        description: '🔗 لینک ویدیو ( چند لینک با فاصله )'
         required: true
         type: string
 
-      download_subtitles:
-        description: '📝 دانلود زیرنویس'
-        required: false
-        default: false
-        type: boolean
-
-      quality:
-        description: '🎬 کیفیت'
-        required: false
-        default: 'best'
-        type: choice
-        options:
-          - best
-          - 2160
-          - 1440
-          - 1080
-          - 720
-          - 480
-          - 360
-          - audio
-
-      password:
-        description: '🔒 رمز فایل'
-        required: false
-        default: ''
-        type: string
-
 jobs:
-
   get-video:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
 
+    # -----------------------------------
+    # NODE24 FIX
+    # -----------------------------------
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
-    permissions:
-      contents: write
+    timeout-minutes: 180
 
     steps:
 
-      # ============================================================
+      # -----------------------------------
       # CHECKOUT
-      # ============================================================
-
-      - name: Checkout
+      # -----------------------------------
+      - name: بررسی اولیه
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
 
-      # ============================================================
-      # FREE SPACE
-      # ============================================================
-
+      # -----------------------------------
+      # DISK CLEANUP
+      # -----------------------------------
       - name: Free disk space
         run: |
-          echo "Disk before cleanup:"
+          echo "Before cleanup:"
           df -h
 
           sudo rm -rf /usr/share/dotnet || true
@@ -72,411 +51,199 @@ jobs:
 
           docker system prune -af || true
 
-          echo "Disk after cleanup:"
+          echo "After cleanup:"
           df -h
 
-      # ============================================================
-      # GIT CONFIG
-      # ============================================================
-
-      - name: Configure Git
+      # -----------------------------------
+      # GIT CONFIG IMPROVEMENTS
+      # -----------------------------------
+      - name: آماده سازی گیت برای فایلهای بزرگ
         run: |
           git config --global http.postBuffer 524288000
+          git config --global http.maxRequestBuffer 100M
           git config --global core.compression 0
+          git config --global pack.windowMemory 256m
+          git config --global pack.packSizeLimit 100m
+          git config --global pack.threads 1
+
+          # NEW
+          git config --global gc.auto 0
 
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
 
-      # ============================================================
-      # INSTALL
-      # ============================================================
+      # -----------------------------------
+      # IMPORTANT:
+      # CHANGE ALL:
+      #
+      # --concurrent-fragments 8
+      #
+      # TO:
+      #
+      # --concurrent-fragments 2
+      #
+      # IN ALL yt-dlp COMMANDS
+      # -----------------------------------
 
-      - name: Install packages
+      # -----------------------------------
+      # IMPORTANT:
+      # CHANGE ALL:
+      #
+      # SPLIT_MB=90
+      #
+      # TO:
+      #
+      # SPLIT_MB=45
+      # -----------------------------------
+
+      # -----------------------------------
+      # IMPORTANT:
+      # MAKE SURE EVERY yt-dlp COMMAND HAS:
+      #
+      # --no-cache-dir
+      #
+      # Humans love memory leaks apparently.
+      # -----------------------------------
+
+      # ===================================
+      # REPLACE THIS:
+      #
+      # FINAL_FOLDER_NAME=$(get_unique_folder "videos" "$FILENAME_NO_EXT")
+      #
+      # WITH THIS:
+      # ===================================
+
+      - name: Duplicate fix example
         run: |
-          sudo apt update
+          FINAL_FOLDER_NAME="$FILENAME_NO_EXT"
 
-          sudo apt install -y \
-            ffmpeg \
-            python3-pip \
-            zip \
-            unzip \
-            p7zip-full \
-            jq \
-            bc \
-            curl
+          # remove previous versions
+          if [ -d "$BACKUP_DIR/${FINAL_FOLDER_NAME}" ]; then
+            echo "Removing old backup..."
+            rm -rf "$BACKUP_DIR/${FINAL_FOLDER_NAME}"
+          fi
 
-          curl -fsSL https://deno.land/install.sh | sh
+          if [ -d "videos/${FINAL_FOLDER_NAME}" ]; then
+            echo "Removing old repo folder..."
+            rm -rf "videos/${FINAL_FOLDER_NAME}"
+          fi
 
-          export DENO_INSTALL="$HOME/.deno"
-          export PATH="$DENO_INSTALL/bin:$PATH"
+          mkdir -p "$BACKUP_DIR/${FINAL_FOLDER_NAME}"
 
-          echo "$DENO_INSTALL/bin" >> $GITHUB_PATH
+      # ===================================
+      # MULTIPLE THUMBNAILS
+      # ADD AFTER:
+      #
+      # echo "✅ Thumbnail saved"
+      # ===================================
 
-          pip3 install -U yt-dlp
-
-      # ============================================================
-      # START WARP
-      # ============================================================
-
-      - name: Start WARP
+      - name: Thumbnail generation example
         run: |
+          mkdir -p "$BACKUP_DIR/${FINAL_FOLDER_NAME}/thumbnails"
 
-          docker network create warp-net || true
+          VIDEO_FILE="$FILE"
 
-          docker run -d \
-            --name warp \
-            --restart=always \
-            --network warp-net \
-            -p 1080:1080 \
-            --cap-add NET_ADMIN \
-            caomingjun/warp
+          DURATION=$(ffprobe -v error \
+            -show_entries format=duration \
+            -of default=noprint_wrappers=1:nokey=1 \
+            "$VIDEO_FILE")
 
-          sleep 15
+          T1=$(printf "%.0f" "$(echo "$DURATION*0.2" | bc)")
+          T2=$(printf "%.0f" "$(echo "$DURATION*0.5" | bc)")
+          T3=$(printf "%.0f" "$(echo "$DURATION*0.8" | bc)")
 
-      # ============================================================
-      # DOWNLOAD
-      # ============================================================
+          ffmpeg -y -ss $T1 -i "$VIDEO_FILE" -frames:v 1 \
+            "$BACKUP_DIR/${FINAL_FOLDER_NAME}/thumbnails/thumb1.jpg"
 
-      - name: Download videos
-        env:
-          URLS: ${{ github.event.inputs.video_urls }}
-          QUALITY: ${{ github.event.inputs.quality }}
-          PASSWORD: ${{ github.event.inputs.password }}
+          ffmpeg -y -ss $T2 -i "$VIDEO_FILE" -frames:v 1 \
+            "$BACKUP_DIR/${FINAL_FOLDER_NAME}/thumbnails/thumb2.jpg"
+
+          ffmpeg -y -ss $T3 -i "$VIDEO_FILE" -frames:v 1 \
+            "$BACKUP_DIR/${FINAL_FOLDER_NAME}/thumbnails/thumb3.jpg"
+
+          # optional collage
+          ffmpeg \
+            -i "$BACKUP_DIR/${FINAL_FOLDER_NAME}/thumbnails/thumb1.jpg" \
+            -i "$BACKUP_DIR/${FINAL_FOLDER_NAME}/thumbnails/thumb2.jpg" \
+            -i "$BACKUP_DIR/${FINAL_FOLDER_NAME}/thumbnails/thumb3.jpg" \
+            -filter_complex "hstack=inputs=3" \
+            "$BACKUP_DIR/${FINAL_FOLDER_NAME}/thumbnails/collage.jpg"
+
+      # ===================================
+      # QUALITY CONVERSION
+      #
+      # REPLACE THIS BLOCK:
+      #
+      # QUALITY_OK=false
+      # rm -f "$DOWNLOADED_FILE"
+      #
+      # WITH THIS:
+      # ===================================
+
+      - name: Compression example
         run: |
-
-          set -e
-
-          mkdir -p videos
-
-          SPLIT_MB=45
-
-          sanitize() {
-            echo "$1" | sed 's/ /-/g' | tr -cd '[:alnum:]-_'
-          }
-
-          urlencode() {
-            python3 -c \
-            "import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1]))" \
-            "$1"
-          }
-
-          read -ra URL_ARRAY <<< "$URLS"
-
-          # ========================================================
-          # FORMAT
-          # ========================================================
-
-          case "$QUALITY" in
-
-            audio)
-              FORMAT="bestaudio/best"
-              ;;
-
-            best)
-              FORMAT="bestvideo+bestaudio/best"
-              ;;
-
-            *)
-              FORMAT="bestvideo[height<=${QUALITY}]+bestaudio/best"
-              ;;
-
-          esac
-
-          # ========================================================
-          # LOOP
-          # ========================================================
-
-          for URL in "${URL_ARRAY[@]}"; do
-
-            echo "================================================"
-            echo "$URL"
-            echo "================================================"
-
-            TMP_DIR="tmp_$RANDOM"
-
-            mkdir -p "$TMP_DIR"
-
-            DOWNLOAD_OK=false
-
-            # ====================================================
-            # MULTI METHOD DOWNLOAD
-            # ====================================================
-
-            for METHOD in 1 2 3 4 5; do
-
-              echo "Trying method $METHOD"
-
-              case $METHOD in
-
-                1)
-
-                  yt-dlp \
-                    --proxy socks5://127.0.0.1:1080 \
-                    --format "$FORMAT" \
-                    --merge-output-format mp4 \
-                    --extractor-args "youtube:player_client=web" \
-                    --js-runtimes deno \
-                    --remote-components ejs:github \
-                    --write-thumbnail \
-                    --convert-thumbnails jpg \
-                    --output "$TMP_DIR/%(title)s.%(ext)s" \
-                    --concurrent-fragments 2 \
-                    --retries 5 \
-                    "$URL"
-                  ;;
-
-                2)
-
-                  yt-dlp \
-                    --proxy socks5://127.0.0.1:1080 \
-                    --format "$FORMAT" \
-                    --extractor-args "youtube:player_client=mweb" \
-                    --merge-output-format mp4 \
-                    --write-thumbnail \
-                    --convert-thumbnails jpg \
-                    --output "$TMP_DIR/%(title)s.%(ext)s" \
-                    --concurrent-fragments 2 \
-                    "$URL"
-                  ;;
-
-                3)
-
-                  yt-dlp \
-                    --proxy socks5://127.0.0.1:1080 \
-                    --format "$FORMAT" \
-                    --extractor-args "youtube:player_client=android_vr" \
-                    --merge-output-format mp4 \
-                    --write-thumbnail \
-                    --convert-thumbnails jpg \
-                    --output "$TMP_DIR/%(title)s.%(ext)s" \
-                    "$URL"
-                  ;;
-
-                4)
-
-                  yt-dlp \
-                    --format "$FORMAT" \
-                    --merge-output-format mp4 \
-                    --write-thumbnail \
-                    --convert-thumbnails jpg \
-                    --output "$TMP_DIR/%(title)s.%(ext)s" \
-                    "$URL"
-                  ;;
-
-                5)
-
-                  yt-dlp \
-                    --extractor-args "youtube:player_client=android" \
-                    --format "$FORMAT" \
-                    --merge-output-format mp4 \
-                    --write-thumbnail \
-                    --convert-thumbnails jpg \
-                    --output "$TMP_DIR/%(title)s.%(ext)s" \
-                    "$URL"
-                  ;;
-
-              esac
-
-              VIDEO=$(find "$TMP_DIR" -type f \
-                \( -name "*.mp4" -o -name "*.mkv" -o -name "*.webm" \) \
-                | head -1)
-
-              if [ -n "$VIDEO" ]; then
-                DOWNLOAD_OK=true
-                break
-              fi
-
-            done
-
-            if [ "$DOWNLOAD_OK" = false ]; then
-              echo "Download failed"
-              rm -rf "$TMP_DIR"
-              continue
-            fi
-
-            # ====================================================
-            # FILE INFO
-            # ====================================================
-
-            BASENAME=$(basename "$VIDEO")
-
-            NAME="${BASENAME%.*}"
-
-            SAFE_NAME=$(sanitize "$NAME")
-
-            FINAL_DIR="videos/$SAFE_NAME"
-
-            # ====================================================
-            # REMOVE OLD DUPLICATES
-            # ====================================================
-
-            rm -rf "$FINAL_DIR"
-
-            mkdir -p "$FINAL_DIR"
-
-            # ====================================================
-            # QUALITY CHECK
-            # ====================================================
-
-            HEIGHT=$(ffprobe \
-              -v error \
-              -select_streams v:0 \
-              -show_entries stream=height \
-              -of csv=p=0 \
-              "$VIDEO")
-
-            echo "Actual quality: ${HEIGHT}p"
-
-            # ====================================================
-            # AUTO COMPRESS
-            # ====================================================
-
-            if [ "$QUALITY" != "best" ] &&
-               [ "$QUALITY" != "audio" ] &&
-               [ "$HEIGHT" -gt "$QUALITY" ]; then
-
-              echo "Compressing ${HEIGHT}p -> ${QUALITY}p"
-
-              ffmpeg -y \
-                -i "$VIDEO" \
-                -vf "scale=-2:${QUALITY}" \
-                -c:v libx264 \
-                -preset fast \
-                -crf 23 \
-                -c:a aac \
-                -b:a 128k \
-                "$FINAL_DIR/${SAFE_NAME}_${QUALITY}p.mp4"
-
-            else
-
-              cp "$VIDEO" "$FINAL_DIR/"
-
-            fi
-
-            # ====================================================
-            # MAIN THUMBNAIL
-            # ====================================================
-
-            THUMB=$(find "$TMP_DIR" -name "*.jpg" | head -1)
-
-            if [ -n "$THUMB" ]; then
-              cp "$THUMB" "$FINAL_DIR/thumbnail.jpg"
-            fi
-
-            # ====================================================
-            # MULTIPLE THUMBNAILS
-            # ====================================================
-
-            mkdir -p "$FINAL_DIR/thumbnails"
-
-            DURATION=$(ffprobe \
-              -v error \
-              -show_entries format=duration \
-              -of default=noprint_wrappers=1:nokey=1 \
-              "$VIDEO")
-
-            T1=$(printf "%.0f" "$(echo "$DURATION*0.2" | bc)")
-            T2=$(printf "%.0f" "$(echo "$DURATION*0.5" | bc)")
-            T3=$(printf "%.0f" "$(echo "$DURATION*0.8" | bc)")
-
-            ffmpeg -y -ss $T1 -i "$VIDEO" -frames:v 1 \
-              "$FINAL_DIR/thumbnails/thumb1.jpg"
-
-            ffmpeg -y -ss $T2 -i "$VIDEO" -frames:v 1 \
-              "$FINAL_DIR/thumbnails/thumb2.jpg"
-
-            ffmpeg -y -ss $T3 -i "$VIDEO" -frames:v 1 \
-              "$FINAL_DIR/thumbnails/thumb3.jpg"
-
-            # ====================================================
-            # ZIP LARGE FILES
-            # ====================================================
-
-            FINAL_VIDEO=$(find "$FINAL_DIR" -type f \
-              \( -name "*.mp4" -o -name "*.mkv" -o -name "*.webm" \) \
-              | head -1)
-
-            SIZE=$(stat -c%s "$FINAL_VIDEO")
-
-            LIMIT=$(( SPLIT_MB * 1024 * 1024 ))
-
-            if [ "$SIZE" -gt "$LIMIT" ]; then
-
-              echo "Splitting archive..."
-
-              if [ -n "$PASSWORD" ]; then
-
-                7z a \
-                  -tzip \
-                  -v${SPLIT_MB}m \
-                  -p"$PASSWORD" \
-                  "$FINAL_DIR/${SAFE_NAME}.zip" \
-                  "$FINAL_VIDEO"
-
-              else
-
-                zip -0 -s ${SPLIT_MB}m \
-                  "$FINAL_DIR/${SAFE_NAME}.zip" \
-                  "$FINAL_VIDEO"
-
-              fi
-
-              rm -f "$FINAL_VIDEO"
-
-            fi
-
-            # ====================================================
-            # README
-            # ====================================================
-
-            cat > "$FINAL_DIR/README.md" << EOF
-# $SAFE_NAME
-
-## Info
-
-      - Requested Quality: $QUALITY
-      - Actual Source Quality: ${HEIGHT}p
-      
-      ## Files
-      
-      - Video / Archive
-      - Main thumbnail
-      - 3 preview thumbnails
-      
-        EOF
-  
-rm -rf "$TMP_DIR"
-    done
-  
-  # ============================================================
-  # STOP WARP
-  # ============================================================
-  
-         - name: Stop WARP
-  if: always()
-  run: |
-    docker stop warp || true
-    docker rm warp || true
-
-# ============================================================
-# PUSH
-# ============================================================
-
- - name: Push
-run: |
-
+          echo "Compressing video to requested quality..."
+
+          COMPRESSED_FILE="${DOWNLOADED_FILE%.*}_${QUALITY}p.mp4"
+
+          ffmpeg -y \
+            -i "$DOWNLOADED_FILE" \
+            -vf "scale=-2:${QUALITY}" \
+            -c:v libx264 \
+            -preset fast \
+            -crf 23 \
+            -c:a aac \
+            -b:a 128k \
+            "$COMPRESSED_FILE"
+
+          rm -f "$DOWNLOADED_FILE"
+
+          DOWNLOADED_FILE="$COMPRESSED_FILE"
+
+          echo "✅ Compression complete"
+
+          QUALITY_OK=true
+
+      # ===================================
+      # STORAGE FAILSAFE
+      #
+      # ADD INSIDE DOWNLOAD LOOP
+      # ===================================
+
+      - name: Storage monitor example
+        run: |
+          echo "Disk usage:"
+          df -h /
+
+          AVAILABLE=$(df / | awk 'NR==2 {print $4}')
+
+          if [ "$AVAILABLE" -lt 2097152 ]; then
+            echo "❌ Less than 2GB free"
+            exit 1
+          fi
+
+      # ===================================
+      # CLEAN TEMP FILES BEFORE PUSH
+      #
+      # ADD BEFORE:
+      #
+      # git add -A videos/
+      # ===================================
+
+      - name: Cleanup temp files
+        run: |
           find videos -name "*.part" -delete
           find videos -name "*.temp" -delete
           find videos -name "*.ytdl" -delete
+          find videos -name "*.f*.mp4" -delete
+          find videos -name "*.frag*" -delete
 
+      # ===================================
+      # GIT GC BEFORE PUSH
+      #
+      # ADD BEFORE git push
+      # ===================================
+
+      - name: Git cleanup
+        run: |
           git gc --prune=now || true
-
-          git add videos/
-
-          git diff --cached --quiet && exit 0
-
-          git commit -m "video download [skip ci]"
-
-          git pull --rebase origin ${GITHUB_REF_NAME}
-
-          git push

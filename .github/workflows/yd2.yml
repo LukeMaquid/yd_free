@@ -1,0 +1,339 @@
+# ============================================================
+# IMPROVED YOUTUBE DOWNLOADER
+# FIXES:
+# - duplicate folders
+# - disk exhaustion
+# - multiple thumbnails
+# - giant logs
+# - unstable pushes
+# - unnecessary copies
+# - temporary garbage
+# ============================================================
+
+name: دانلودر خودم ساز 
+
+on:
+  workflow_dispatch:
+    inputs:
+      video_urls:
+        description: '🔗 لینک ویدیو ( چند لینک با فاصله )'
+        required: true
+        type: string
+
+      quality:
+        description: '🎬 کیفیت'
+        required: false
+        default: '1080'
+        type: choice
+        options:
+          - best
+          - 2160
+          - 1440
+          - 1080
+          - 720
+          - 480
+          - audio
+
+      password:
+        description: '🔒 رمز'
+        required: false
+        default: ''
+        type: string
+
+jobs:
+  get-video:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    permissions:
+      contents: write
+
+    steps:
+
+      # ========================================================
+      # CHECKOUT
+      # ========================================================
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      # ========================================================
+      # FREE DISK SPACE
+      # ========================================================
+
+      - name: Free Disk Space
+        run: |
+          echo "Disk before cleanup:"
+          df -h
+
+          sudo rm -rf /usr/share/dotnet || true
+          sudo rm -rf /opt/ghc || true
+          sudo rm -rf /usr/local/lib/android || true
+          docker system prune -af || true
+
+          echo "Disk after cleanup:"
+          df -h
+
+      # ========================================================
+      # INSTALL
+      # ========================================================
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+
+          sudo apt-get install -y \
+            ffmpeg \
+            p7zip-full \
+            python3-pip \
+            curl \
+            jq \
+            bc
+
+          pip3 install -U yt-dlp
+
+      # ========================================================
+      # CONFIG
+      # ========================================================
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+
+      # ========================================================
+      # DOWNLOAD
+      # ========================================================
+
+      - name: Download Videos
+        env:
+          URLS: ${{ github.event.inputs.video_urls }}
+          QUALITY: ${{ github.event.inputs.quality }}
+          PASSWORD: ${{ github.event.inputs.password }}
+        run: |
+
+          mkdir -p videos
+
+          read -ra URL_LIST <<< "$URLS"
+
+          sanitize_name() {
+            echo "$1" \
+            | sed 's/ /-/g' \
+            | tr -cd '[:alnum:]-_'
+          }
+
+          for URL in "${URL_LIST[@]}"; do
+
+            echo "================================================"
+            echo "Processing: $URL"
+            echo "================================================"
+
+            # ----------------------------------------------------
+            # VIDEO ID
+            # ----------------------------------------------------
+
+            VIDEO_ID=$(yt-dlp --get-id "$URL" | head -1)
+
+            if [ -z "$VIDEO_ID" ]; then
+              echo "Failed getting video ID"
+              continue
+            fi
+
+            # ----------------------------------------------------
+            # TITLE
+            # ----------------------------------------------------
+
+            TITLE=$(yt-dlp --get-title "$URL" | head -1)
+
+            SAFE_TITLE=$(sanitize_name "$TITLE")
+
+            FINAL_FOLDER="${SAFE_TITLE}_${VIDEO_ID}"
+
+            OUTPUT_DIR="videos/${FINAL_FOLDER}"
+
+            mkdir -p "$OUTPUT_DIR"
+
+            echo "Folder:"
+            echo "$OUTPUT_DIR"
+
+            # ----------------------------------------------------
+            # FORMAT
+            # ----------------------------------------------------
+
+            case "$QUALITY" in
+
+              "audio")
+                FORMAT="bestaudio"
+                ;;
+              "2160")
+                FORMAT="bestvideo[height<=2160]+bestaudio/best"
+                ;;
+              "1440")
+                FORMAT="bestvideo[height<=1440]+bestaudio/best"
+                ;;
+              "1080")
+                FORMAT="bestvideo[height<=1080]+bestaudio/best"
+                ;;
+              "720")
+                FORMAT="bestvideo[height<=720]+bestaudio/best"
+                ;;
+              "480")
+                FORMAT="bestvideo[height<=480]+bestaudio/best"
+                ;;
+              *)
+                FORMAT="bestvideo+bestaudio/best"
+                ;;
+
+            esac
+
+            # ----------------------------------------------------
+            # DOWNLOAD
+            # ----------------------------------------------------
+
+            yt-dlp \
+              --format "$FORMAT" \
+              --merge-output-format mp4 \
+              --no-playlist \
+              --concurrent-fragments 4 \
+              --retries 10 \
+              --fragment-retries 10 \
+              --no-cache-dir \
+              --newline \
+              --progress-template "%(progress._percent_str)s" \
+              --write-thumbnail \
+              --convert-thumbnails jpg \
+              --output "${OUTPUT_DIR}/%(title)s.%(ext)s" \
+              "$URL"
+
+            # ----------------------------------------------------
+            # FIND VIDEO FILE
+            # ----------------------------------------------------
+
+            VIDEO_FILE=$(find "$OUTPUT_DIR" -type f \
+              \( -name "*.mp4" -o -name "*.mkv" -o -name "*.webm" -o -name "*.mp3" \) \
+              | head -1)
+
+            if [ ! -f "$VIDEO_FILE" ]; then
+              echo "Download failed"
+              continue
+            fi
+
+            echo "Downloaded:"
+            echo "$VIDEO_FILE"
+
+            # ----------------------------------------------------
+            # MULTIPLE THUMBNAILS
+            # ----------------------------------------------------
+
+            mkdir -p "${OUTPUT_DIR}/thumbnails"
+
+            DURATION=$(ffprobe \
+              -v error \
+              -show_entries format=duration \
+              -of default=noprint_wrappers=1:nokey=1 \
+              "$VIDEO_FILE")
+
+            THUMB1=$(echo "$DURATION * 0.2" | bc)
+            THUMB2=$(echo "$DURATION * 0.5" | bc)
+            THUMB3=$(echo "$DURATION * 0.8" | bc)
+
+            ffmpeg -y \
+              -ss "$THUMB1" \
+              -i "$VIDEO_FILE" \
+              -frames:v 1 \
+              "${OUTPUT_DIR}/thumbnails/thumb1.jpg"
+
+            ffmpeg -y \
+              -ss "$THUMB2" \
+              -i "$VIDEO_FILE" \
+              -frames:v 1 \
+              "${OUTPUT_DIR}/thumbnails/thumb2.jpg"
+
+            ffmpeg -y \
+              -ss "$THUMB3" \
+              -i "$VIDEO_FILE" \
+              -frames:v 1 \
+              "${OUTPUT_DIR}/thumbnails/thumb3.jpg"
+
+            # ----------------------------------------------------
+            # PREVIEW GRID
+            # ----------------------------------------------------
+
+            ffmpeg -y \
+              -i "$VIDEO_FILE" \
+              -vf "fps=1/60,scale=320:-1,tile=3x3" \
+              "${OUTPUT_DIR}/thumbnails/preview-grid.jpg"
+
+            # ----------------------------------------------------
+            # SPLIT LARGE FILES
+            # ----------------------------------------------------
+
+            FILE_SIZE=$(stat -c%s "$VIDEO_FILE")
+
+            LIMIT=$((90 * 1024 * 1024))
+
+            if [ "$FILE_SIZE" -gt "$LIMIT" ]; then
+
+              echo "Large file detected"
+
+              mkdir -p "${OUTPUT_DIR}/archive"
+
+              if [ -n "$PASSWORD" ]; then
+
+                7z a \
+                  -t7z \
+                  -mx=1 \
+                  -v90m \
+                  -p"$PASSWORD" \
+                  "${OUTPUT_DIR}/archive/${FINAL_FOLDER}.7z" \
+                  "$VIDEO_FILE"
+
+              else
+
+                7z a \
+                  -t7z \
+                  -mx=1 \
+                  -v90m \
+                  "${OUTPUT_DIR}/archive/${FINAL_FOLDER}.7z" \
+                  "$VIDEO_FILE"
+
+              fi
+
+              rm -f "$VIDEO_FILE"
+
+            fi
+
+            # ----------------------------------------------------
+            # CLEAN TEMP
+            # ----------------------------------------------------
+
+            yt-dlp --rm-cache-dir || true
+
+            docker system prune -af || true
+
+            rm -rf /tmp/* || true
+
+            echo "Disk usage:"
+            df -h
+
+          done
+
+      # ========================================================
+      # COMMIT
+      # ========================================================
+
+      - name: Commit Files
+        run: |
+
+          git add videos/
+
+          if git diff --cached --quiet; then
+            echo "Nothing to commit"
+            exit 0
+          fi
+
+          git commit -m "YouTube download [skip ci]"
+
+          git push

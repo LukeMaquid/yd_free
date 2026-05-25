@@ -1,22 +1,30 @@
 # ============================================================
-# IMPROVED YOUTUBE DOWNLOADER
+# ULTIMATE YOUTUBE DOWNLOADER
+# IMPROVED VERSION
+#
 # FIXES:
-# - duplicate folders
-# - disk exhaustion
-# - multiple thumbnails
-# - giant logs
-# - unstable pushes
-# - unnecessary copies
-# - temporary garbage
+# ✅ no duplicate folders
+# ✅ auto replace old downloads
+# ✅ multiple thumbnails
+# ✅ preview grid
+# ✅ compress oversized videos
+# ✅ reduced logs
+# ✅ safer cleanup
+# ✅ disk cleanup
+# ✅ node24 support
+# ✅ ffmpeg error handling
+# ✅ bash strict mode
+# ✅ stable storage usage
 # ============================================================
 
-name: دانلودر خودم ساز 
+name: 02 - 🎬 دانلود خودم ساز 
 
 on:
   workflow_dispatch:
     inputs:
+
       video_urls:
-        description: '🔗 لینک ویدیو ( چند لینک با فاصله )'
+        description: '🔗 لینک ویدیو'
         required: true
         type: string
 
@@ -40,9 +48,15 @@ on:
         default: ''
         type: string
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
+
   get-video:
+
     runs-on: ubuntu-latest
+
     timeout-minutes: 180
 
     permissions:
@@ -50,38 +64,43 @@ jobs:
 
     steps:
 
-      # ========================================================
+      # ======================================================
       # CHECKOUT
-      # ========================================================
+      # ======================================================
 
       - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
+        uses: actions/checkout@v5
 
-      # ========================================================
+      # ======================================================
       # FREE DISK SPACE
-      # ========================================================
+      # ======================================================
 
       - name: Free Disk Space
         run: |
+
+          set -euxo pipefail
+
           echo "Disk before cleanup:"
           df -h
 
           sudo rm -rf /usr/share/dotnet || true
           sudo rm -rf /opt/ghc || true
           sudo rm -rf /usr/local/lib/android || true
+
           docker system prune -af || true
 
           echo "Disk after cleanup:"
           df -h
 
-      # ========================================================
+      # ======================================================
       # INSTALL
-      # ========================================================
+      # ======================================================
 
       - name: Install Dependencies
         run: |
+
+          set -euxo pipefail
+
           sudo apt-get update
 
           sudo apt-get install -y \
@@ -94,56 +113,72 @@ jobs:
 
           pip3 install -U yt-dlp
 
-      # ========================================================
-      # CONFIG
-      # ========================================================
+      # ======================================================
+      # CONFIG GIT
+      # ======================================================
 
       - name: Configure Git
         run: |
+
+          set -euxo pipefail
+
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
 
-      # ========================================================
-      # DOWNLOAD
-      # ========================================================
+      # ======================================================
+      # DOWNLOAD VIDEOS
+      # ======================================================
 
       - name: Download Videos
+
         env:
           URLS: ${{ github.event.inputs.video_urls }}
           QUALITY: ${{ github.event.inputs.quality }}
           PASSWORD: ${{ github.event.inputs.password }}
+
         run: |
+
+          set -euxo pipefail
 
           mkdir -p videos
 
           read -ra URL_LIST <<< "$URLS"
 
           sanitize_name() {
+
             echo "$1" \
             | sed 's/ /-/g' \
             | tr -cd '[:alnum:]-_'
+
           }
 
           for URL in "${URL_LIST[@]}"; do
 
             echo "================================================"
-            echo "Processing: $URL"
+            echo "PROCESSING:"
+            echo "$URL"
             echo "================================================"
 
-            # ----------------------------------------------------
+            echo "Current disk usage:"
+            df -h
+
+            # --------------------------------------------------
             # VIDEO ID
-            # ----------------------------------------------------
+            # --------------------------------------------------
 
             VIDEO_ID=$(yt-dlp --get-id "$URL" | head -1)
 
             if [ -z "$VIDEO_ID" ]; then
-              echo "Failed getting video ID"
+
+              echo "FAILED TO GET VIDEO ID"
+
               continue
+
             fi
 
-            # ----------------------------------------------------
+            # --------------------------------------------------
             # TITLE
-            # ----------------------------------------------------
+            # --------------------------------------------------
 
             TITLE=$(yt-dlp --get-title "$URL" | head -1)
 
@@ -153,79 +188,144 @@ jobs:
 
             OUTPUT_DIR="videos/${FINAL_FOLDER}"
 
+            # --------------------------------------------------
+            # REMOVE OLD VERSION
+            # --------------------------------------------------
+
+            if [ -d "$OUTPUT_DIR" ]; then
+
+              echo "OLD VERSION EXISTS"
+              echo "REMOVING..."
+
+              rm -rf "$OUTPUT_DIR"
+
+            fi
+
             mkdir -p "$OUTPUT_DIR"
 
-            echo "Folder:"
-            echo "$OUTPUT_DIR"
-
-            # ----------------------------------------------------
+            # --------------------------------------------------
             # FORMAT
-            # ----------------------------------------------------
+            # --------------------------------------------------
 
             case "$QUALITY" in
 
               "audio")
                 FORMAT="bestaudio"
                 ;;
+
               "2160")
                 FORMAT="bestvideo[height<=2160]+bestaudio/best"
                 ;;
+
               "1440")
                 FORMAT="bestvideo[height<=1440]+bestaudio/best"
                 ;;
+
               "1080")
                 FORMAT="bestvideo[height<=1080]+bestaudio/best"
                 ;;
+
               "720")
                 FORMAT="bestvideo[height<=720]+bestaudio/best"
                 ;;
+
               "480")
                 FORMAT="bestvideo[height<=480]+bestaudio/best"
                 ;;
+
               *)
                 FORMAT="bestvideo+bestaudio/best"
                 ;;
 
             esac
 
-            # ----------------------------------------------------
+            # --------------------------------------------------
             # DOWNLOAD
-            # ----------------------------------------------------
+            # --------------------------------------------------
 
             yt-dlp \
               --format "$FORMAT" \
               --merge-output-format mp4 \
               --no-playlist \
-              --concurrent-fragments 4 \
               --retries 10 \
               --fragment-retries 10 \
+              --concurrent-fragments 4 \
               --no-cache-dir \
-              --newline \
-              --progress-template "%(progress._percent_str)s" \
               --write-thumbnail \
               --convert-thumbnails jpg \
+              --progress-template "%(progress._percent_str)s" \
               --output "${OUTPUT_DIR}/%(title)s.%(ext)s" \
               "$URL"
 
-            # ----------------------------------------------------
+            # --------------------------------------------------
             # FIND VIDEO FILE
-            # ----------------------------------------------------
+            # --------------------------------------------------
 
             VIDEO_FILE=$(find "$OUTPUT_DIR" -type f \
               \( -name "*.mp4" -o -name "*.mkv" -o -name "*.webm" -o -name "*.mp3" \) \
               | head -1)
 
             if [ ! -f "$VIDEO_FILE" ]; then
-              echo "Download failed"
-              continue
+
+              echo "VIDEO NOT FOUND"
+
+              exit 1
+
             fi
 
-            echo "Downloaded:"
+            echo "VIDEO:"
             echo "$VIDEO_FILE"
 
-            # ----------------------------------------------------
+            # --------------------------------------------------
+            # FORCE QUALITY CONVERSION
+            # --------------------------------------------------
+
+            if [ "$QUALITY" != "best" ] && \
+               [ "$QUALITY" != "audio" ]; then
+
+              ACTUAL_HEIGHT=$(ffprobe \
+                -v error \
+                -select_streams v:0 \
+                -show_entries stream=height \
+                -of csv=p=0 \
+                "$VIDEO_FILE")
+
+              echo "ACTUAL HEIGHT:"
+              echo "$ACTUAL_HEIGHT"
+
+              if [ "$ACTUAL_HEIGHT" -gt "$QUALITY" ]; then
+
+                echo "CONVERTING TO ${QUALITY}p"
+
+                COMPRESSED_FILE="${VIDEO_FILE%.*}_${QUALITY}p.mp4"
+
+                if ! ffmpeg -y \
+                  -i "$VIDEO_FILE" \
+                  -vf "scale=-2:${QUALITY}" \
+                  -c:v libx264 \
+                  -preset veryfast \
+                  -crf 28 \
+                  -c:a aac \
+                  -b:a 128k \
+                  "$COMPRESSED_FILE"; then
+
+                  echo "FFMPEG FAILED"
+
+                  exit 1
+
+                fi
+
+                rm -f "$VIDEO_FILE"
+
+                VIDEO_FILE="$COMPRESSED_FILE"
+
+              fi
+
+            fi
+
+            # --------------------------------------------------
             # MULTIPLE THUMBNAILS
-            # ----------------------------------------------------
+            # --------------------------------------------------
 
             mkdir -p "${OUTPUT_DIR}/thumbnails"
 
@@ -257,18 +357,18 @@ jobs:
               -frames:v 1 \
               "${OUTPUT_DIR}/thumbnails/thumb3.jpg"
 
-            # ----------------------------------------------------
+            # --------------------------------------------------
             # PREVIEW GRID
-            # ----------------------------------------------------
+            # --------------------------------------------------
 
             ffmpeg -y \
               -i "$VIDEO_FILE" \
               -vf "fps=1/60,scale=320:-1,tile=3x3" \
               "${OUTPUT_DIR}/thumbnails/preview-grid.jpg"
 
-            # ----------------------------------------------------
+            # --------------------------------------------------
             # SPLIT LARGE FILES
-            # ----------------------------------------------------
+            # --------------------------------------------------
 
             FILE_SIZE=$(stat -c%s "$VIDEO_FILE")
 
@@ -276,7 +376,7 @@ jobs:
 
             if [ "$FILE_SIZE" -gt "$LIMIT" ]; then
 
-              echo "Large file detected"
+              echo "LARGE FILE DETECTED"
 
               mkdir -p "${OUTPUT_DIR}/archive"
 
@@ -305,33 +405,39 @@ jobs:
 
             fi
 
-            # ----------------------------------------------------
-            # CLEAN TEMP
-            # ----------------------------------------------------
+            # --------------------------------------------------
+            # CLEANUP
+            # --------------------------------------------------
 
             yt-dlp --rm-cache-dir || true
 
+            rm -rf /tmp/yt-dlp* || true
+            rm -rf /tmp/tmp* || true
+
             docker system prune -af || true
 
-            rm -rf /tmp/* || true
-
-            echo "Disk usage:"
+            echo "FINAL DISK USAGE:"
             df -h
 
           done
 
-      # ========================================================
+      # ======================================================
       # COMMIT
-      # ========================================================
+      # ======================================================
 
       - name: Commit Files
         run: |
 
+          set -euxo pipefail
+
           git add videos/
 
           if git diff --cached --quiet; then
-            echo "Nothing to commit"
+
+            echo "NOTHING TO COMMIT"
+
             exit 0
+
           fi
 
           git commit -m "YouTube download [skip ci]"
